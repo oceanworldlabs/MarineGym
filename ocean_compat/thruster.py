@@ -15,7 +15,7 @@ Port changes:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import torch
 from torch import Tensor
@@ -156,6 +156,7 @@ class T200Thruster:
             4.7368e-7 * rpm_sq - 1.9275e-4 * new_rpm + 8.4452e-2,
             -3.8442e-7 * rpm_sq - 1.6186e-4 * new_rpm - 3.9139e-2,
         )
+        raw_force = torch.where(new_rpm == 0, torch.zeros_like(raw_force), raw_force)
 
         # Scale by force_constants ratio (supports heterogeneous rotors)
         thrusts = self.force_constants / 4.4e-7 * 9.81 * raw_force

@@ -38,22 +38,29 @@ def orientation_from_view(
 ) -> Tuple[float, float, float, float]:
     """Compute a quaternion (w, x, y, z) that orients a camera to look at *target*.
 
-    Uses pure-PyTorch math so this works without PXR/Gf.
+    Local +Z points forward and +Y points up. Requires a finite nonzero view direction.
     """
     cam = torch.as_tensor(camera, dtype=torch.float64)
     tgt = torch.as_tensor(target, dtype=torch.float64)
     up = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float64)
 
+    if cam.shape != (3,) or tgt.shape != (3,):
+        raise ValueError("camera and target must be three-dimensional points")
     forward = tgt - cam
-    forward = forward / forward.norm()
+    if not torch.isfinite(forward).all():
+        raise ValueError("camera and target must be finite three-dimensional points")
+    magnitude = forward.norm()
+    if not torch.isfinite(magnitude) or magnitude <= 0:
+        raise ValueError("camera and target must define a finite nonzero view direction")
+    forward = forward / magnitude
 
-    right = torch.cross(forward, up, dim=0)
+    right = torch.cross(up, forward, dim=0)
     if right.norm() < 1e-8:
         up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float64)
-        right = torch.cross(forward, up, dim=0)
+        right = torch.cross(up, forward, dim=0)
     right = right / right.norm()
 
-    up_corrected = torch.cross(right, forward, dim=0)
+    up_corrected = torch.cross(forward, right, dim=0)
 
     rot = torch.stack([right, up_corrected, forward], dim=1)
     trace = rot[0, 0] + rot[1, 1] + rot[2, 2]
