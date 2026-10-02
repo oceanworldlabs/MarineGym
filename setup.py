@@ -6,6 +6,7 @@ setup(
     author="chusg@zju.edu.cn",
     keywords=["robotics", "rl"],
     packages=find_packages("."),
+    package_data={"ocean_compat": ["cfg/*.yaml"]},
     install_requires=[
         "hydra-core",
         "omegaconf",
