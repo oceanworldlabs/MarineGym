@@ -6,7 +6,12 @@ from ocean_compat.thruster import RotorConfig, T200Thruster
 
 @pytest.mark.parametrize("command", [0.0, 0.05, -0.05])
 @pytest.mark.parametrize("batch_size", [1, 3])
-def test_idle_t200_produces_zero_force(command: float, batch_size: int) -> None:
+def test_zero_state_t200_produces_zero_force(command: float, batch_size: int) -> None:
+    """A neutral command from exactly zero RPM has zero force.
+
+    This does not imply a deadband after spin-down: inherited residual RPM
+    continues through the upstream RPM-to-force polynomial.
+    """
     config = RotorConfig(
         force_constants=torch.full((4,), 4.4e-7),
         moment_constants=torch.zeros(4),

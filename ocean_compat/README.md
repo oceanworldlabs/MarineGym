@@ -1,51 +1,86 @@
-# ocean_compat — Isaac Sim 6 + Isaac Lab 3 Compatibility
+# `ocean_compat` source utilities
 
-Pure-PyTorch compatibility layer extracted from MarineGym for use with Isaac Sim 6 and Isaac Lab 3.
+This experimental source package contains PyTorch math, thruster, controller,
+transform, and camera-configuration utilities ported from MarineGym. It uses
+PyTorch and PyYAML.
+
+The code targets Isaac Sim 6 APIs and Isaac Lab 3 beta-era APIs. The Lab API
+references checked for this snapshot are tag `v3.0.0-beta2` and the
+`release/3.0.0` branch snapshot `72cd51194381caa93ee024f93e4007b1fb6c5b92`;
+neither a final Isaac Lab 3 tag nor runtime execution was verified. No Isaac Sim
+or Isaac Lab compatibility, camera rendering, or GPU behavior is claimed by
+these source-level utilities.
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `math.py` | Quaternion ops, rotation matrices, symlog/symexp |
-| `transforms.py` | Euler ↔ rotation matrix conversions |
+| `math.py` | Quaternion operations, rotation matrices, and symlog/symexp |
+| `transforms.py` | Euler-angle and rotation-matrix conversions |
 | `thruster.py` | T200 thruster model with RPM dynamics |
-| `controller.py` | Lee position, attitude, and rate controllers |
-| `sensor.py` | Pinhole/fisheye camera configs |
+| `controller.py` | Lee position, attitude, and rate controller utilities |
+| `sensor.py` | Pinhole/fisheye camera configuration utilities |
 
-## Usage
+## Source-tree example
+
+From the repository root, this example reads the checked-in BlueROV rotor
+configuration and exercises the standalone thruster and quaternion utilities:
 
 ```python
-from ocean_compat import (
-    euler_to_quaternion,
-    T200Thruster,
-    LeePositionController,
-    PinholeCameraCfg,
-)
+from pathlib import Path
 
-# Quaternion math (w, x, y, z convention)
-q = euler_to_quaternion(torch.tensor([0.1, 0.2, 0.3]))
+import torch
+import yaml
 
-# T200 thruster
+from ocean_compat import RotorConfig, T200Thruster, euler_to_quaternion
+
+vehicle_path = Path("marinegym/robots/assets/usd/BlueROV/BlueROV.yaml")
+vehicle = yaml.safe_load(vehicle_path.read_text(encoding="utf-8"))
+rotor_config = RotorConfig.from_yaml(vehicle["rotor_configuration"])
 thruster = T200Thruster(rotor_config, dt=0.02)
-thrusts, moments, new_throttle, new_rpm = thruster(cmds, throttle, rpm)
 
-# Controller
-controller = LeePositionController(g=9.81, uav_params=params)
-cmd = controller.compute(root_state, target_pos=target)
+commands = torch.zeros(rotor_config.num_rotors)
+throttle = torch.zeros_like(commands)
+rpm = torch.zeros_like(commands)
+thrusts, moments, throttle, rpm = thruster(commands, throttle, rpm)
+
+q_wxyz = euler_to_quaternion(torch.tensor([0.1, 0.2, 0.3]))
 ```
 
-## Migration from Isaac 4.x
+The repository does not include a usable `LeePositionController` parameter set
+for a supported vehicle, so the controller class is not presented as a
+ready-to-run example. The source-tree snippet is not an installation or
+simulator acceptance test. `setup.py` installs the broader MarineGym package
+and retains its upstream dependencies, including pinned `torchrl==0.4.0` and
+`tensordict==0.4.0`; this directory is not independently installable as a
+dependency-free package.
 
-| Isaac 4.x (original MarineGym) | Isaac 6 (this compat layer) |
-|-------------------------------|------------------------------|
-| `omni.isaac.core` | `isaacsim.core.api` |
-| `omni.isaac.cloner` | `isaacsim.core.cloner` |
-| `omni.isaac.debug_draw` | `isaacsim.util.debug_draw` |
-| `carb` | Removed |
-| `functorch.vmap` | Direct batched ops (PyTorch native) |
-| `torchrl.EnvBase` | `isaaclab.envs.DirectRLEnv` |
-| `ArticulationView` | `isaaclab.assets.RigidObject` |
+## Interface conventions and limits
 
-## License
+Quaternion values exposed by these utilities use public WXYZ order
+`(w, x, y, z)`. Isaac Lab `OffsetCfg.rot` uses XYZW order `(x, y, z, w)` and
+requires an explicit conversion at that boundary. OpenGL camera coordinates
+use local `-Z` forward and `+Y` up. The camera helpers' mapping between these
+conventions has not passed runtime or rendered-frame validation; do not infer
+camera pose correctness from configuration construction alone.
 
-MIT License — Copyright (c) 2023 Botian Xu, Tsinghua University.
+Controller objects are callable `torch.nn.Module` instances with non-trainable
+registered buffers. Use `.to(device=..., dtype=...)` to align controller state
+with the input tensors. `RotorConfig.from_yaml(..., device=...)` places thruster
+configuration and smoothing tensors on the requested device. Focused CPU and
+CUDA tensor tests cover these paths; they do not establish Isaac runtime or
+vehicle simulation acceptance.
+
+`RateController.process_rl_actions` returns collective thrust with shape
+`(..., 1)` and bounds based on the sum of rotor maximum thrusts. This matches
+the upstream torchrl `RateController` transform, which also uses the summed
+maximum. It differs from the upstream `RateController.process_rl_actions`
+method, which returns per-rotor values and is not directly composable with the
+upstream controller computation; this distinction is an API-shape note, not a
+claim of changed physical behavior.
+
+## License and attribution
+
+The repository is MIT licensed, Copyright (c) 2025 Shuguang Chu, Zhejiang
+University. The ported MarineGym math routines also retain their upstream
+attribution to Copyright (c) 2023 Botian Xu, Tsinghua University.

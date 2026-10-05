@@ -1,7 +1,8 @@
-"""Ocean compat layer for MarineGym on Isaac Sim 6 + Isaac Lab 3.
+"""Experimental MarineGym source utilities targeting Isaac Sim 6 / Isaac Lab 3.
 
-Pure-PyTorch quaternion, rotation, thruster, controller, and sensor utilities.
-No Isaac Sim / torchrl / tensordict dependencies.
+The utilities use PyTorch and PyYAML. Isaac Sim 6 / Isaac Lab 3 runtime
+compatibility has not been verified; no simulator, camera, or GPU acceptance
+is claimed.
 
 Quaternion convention: (w, x, y, z) — aerospace / scalar-first.
 

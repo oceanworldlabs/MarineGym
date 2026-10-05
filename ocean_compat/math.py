@@ -151,8 +151,8 @@ def axis_angle_to_matrix(angle: Tensor, axis: Tensor) -> Tensor:
 def quat_rotate(q: Tensor, v: Tensor) -> Tensor:
     """Rotate vector(s) *v* by quaternion(s) *q*:  v' = q * v * q^{-1}.
 
-    Supports arbitrary batch dimensions (the last dim of *q* is 4,
-    the last dim of *v* is 3; all preceding dimensions broadcast).
+    The batch dimensions of *q* and *v* must match exactly; broadcasting
+    between them is not supported.
 
     Args:
         q: (..., 4) unit quaternion (w, x, y, z).
@@ -161,6 +161,11 @@ def quat_rotate(q: Tensor, v: Tensor) -> Tensor:
     Returns:
         (..., 3) rotated vector(s).
     """
+    if q.shape[:-1] != v.shape[:-1]:
+        raise ValueError(
+            f"q and v batch dimensions must match: {q.shape[:-1]} != {v.shape[:-1]}"
+        )
+
     # Flatten to 2-D for bmm, keep original prefix shape for output.
     q_flat = q.reshape(-1, 4)
     v_flat = v.reshape(-1, 3)
@@ -178,6 +183,8 @@ def quat_rotate_inverse(q: Tensor, v: Tensor) -> Tensor:
     """Rotate vector(s) *v* by the *inverse* of quaternion *q*.
 
     Equivalent to  v' = q^{-1} * v * q.
+    The batch dimensions of *q* and *v* must match exactly; broadcasting
+    between them is not supported.
 
     Args:
         q: (..., 4) unit quaternion (w, x, y, z).
@@ -186,6 +193,11 @@ def quat_rotate_inverse(q: Tensor, v: Tensor) -> Tensor:
     Returns:
         (..., 3) rotated vector(s).
     """
+    if q.shape[:-1] != v.shape[:-1]:
+        raise ValueError(
+            f"q and v batch dimensions must match: {q.shape[:-1]} != {v.shape[:-1]}"
+        )
+
     q_flat = q.reshape(-1, 4)
     v_flat = v.reshape(-1, 3)
     q_w = q_flat[:, 0]

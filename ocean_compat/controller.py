@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 import yaml
-from torch import Tensor
+from torch import Tensor, nn
 
 from .math import (
     axis_angle_to_matrix,
@@ -26,10 +26,16 @@ from .math import (
 )
 
 
-class ControllerBase(abc.ABC):
-    """Base class for MarineGym controllers (plain class, NOT nn.Module)."""
+class ControllerBase(nn.Module, abc.ABC):
+    """Base class for non-trainable MarineGym controllers."""
 
     REGISTRY: Dict[str, type] = {}
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, *args: Any, **kwargs: Any) -> Tensor:
+        return self.compute(*args, **kwargs)
 
     @classmethod
     def __init_subclass__(cls, **kwargs: Any) -> None:
@@ -108,26 +114,31 @@ class LeePositionController(ControllerBase):
     """
 
     def __init__(self, g: float, uav_params: Dict[str, Any]) -> None:
+        super().__init__()
         controller_params = _load_controller_yaml(uav_params["name"])
 
-        self.pos_gain: Tensor = torch.as_tensor(controller_params["position_gain"]).float()
-        self.vel_gain: Tensor = torch.as_tensor(controller_params["velocity_gain"]).float()
-        self.mass: Tensor = torch.tensor(uav_params["mass"])
-        self.g_vec: Tensor = torch.tensor([0.0, 0.0, g]).abs()
+        self.register_buffer("pos_gain", torch.as_tensor(controller_params["position_gain"]).float())
+        self.register_buffer("vel_gain", torch.as_tensor(controller_params["velocity_gain"]).float())
+        self.register_buffer("mass", torch.tensor(uav_params["mass"]))
+        self.register_buffer("g_vec", torch.tensor([0.0, 0.0, g]).abs())
 
         rotor_config = uav_params["rotor_configuration"]
         force_constants = torch.as_tensor(rotor_config["force_constants"])
         max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
 
-        self.max_thrusts: Tensor = max_rot_vel.square() * force_constants
+        self.register_buffer("max_thrusts", max_rot_vel.square() * force_constants)
 
         inertia_matrix = _build_inertia_matrix(uav_params["inertia"])
-        self.mixer: Tensor = compute_parameters(rotor_config, inertia_matrix)
-        self.attitude_gain: Tensor = (
-            torch.as_tensor(controller_params["attitude_gain"]).float() @ inertia_matrix[:3, :3].inverse()
+        self.register_buffer("mixer", compute_parameters(rotor_config, inertia_matrix))
+        self.register_buffer(
+            "attitude_gain",
+            torch.as_tensor(controller_params["attitude_gain"]).float()
+            @ inertia_matrix[:3, :3].inverse(),
         )
-        self.ang_rate_gain: Tensor = (
-            torch.as_tensor(controller_params["angular_rate_gain"]).float() @ inertia_matrix[:3, :3].inverse()
+        self.register_buffer(
+            "ang_rate_gain",
+            torch.as_tensor(controller_params["angular_rate_gain"]).float()
+            @ inertia_matrix[:3, :3].inverse(),
         )
 
     def compute(
@@ -140,18 +151,17 @@ class LeePositionController(ControllerBase):
         body_rate: bool = False,
     ) -> Tensor:
         batch_shape = root_state.shape[:-1]
-        device = root_state.device
 
         if target_pos is None:
             target_pos = root_state[..., :3]
         else:
             target_pos = target_pos.expand(batch_shape + (3,))
         if target_vel is None:
-            target_vel = torch.zeros(*batch_shape, 3, device=device)
+            target_vel = root_state.new_zeros(batch_shape + (3,))
         else:
             target_vel = target_vel.expand(batch_shape + (3,))
         if target_acc is None:
-            target_acc = torch.zeros(*batch_shape, 3, device=device)
+            target_acc = root_state.new_zeros(batch_shape + (3,))
         else:
             target_acc = target_acc.expand(batch_shape + (3,))
         if target_yaw is None:
@@ -243,17 +253,24 @@ class AttitudeController(ControllerBase):
     """
 
     def __init__(self, g: float, uav_params: Dict[str, Any]) -> None:
+        super().__init__()
         rotor_config = uav_params["rotor_configuration"]
         force_constants = torch.as_tensor(rotor_config["force_constants"])
         max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
 
-        self.mass: Tensor = torch.tensor(uav_params["mass"])
-        self.g_scalar: Tensor = torch.tensor(g)
-        self.max_thrusts: Tensor = max_rot_vel.square() * force_constants
+        self.register_buffer("mass", torch.tensor(uav_params["mass"]))
+        self.register_buffer("g_scalar", torch.tensor(g))
+        self.register_buffer("max_thrusts", max_rot_vel.square() * force_constants)
         inertia_matrix = _build_inertia_matrix(uav_params["inertia"])
-        self.mixer: Tensor = compute_parameters(rotor_config, inertia_matrix)
-        self.gain_attitude: Tensor = torch.tensor([3.0, 3.0, 0.035]) @ inertia_matrix[:3, :3].inverse()
-        self.gain_angular_rate: Tensor = torch.tensor([0.52, 0.52, 0.025]) @ inertia_matrix[:3, :3].inverse()
+        self.register_buffer("mixer", compute_parameters(rotor_config, inertia_matrix))
+        self.register_buffer(
+            "gain_attitude",
+            torch.tensor([3.0, 3.0, 0.035]) @ inertia_matrix[:3, :3].inverse(),
+        )
+        self.register_buffer(
+            "gain_angular_rate",
+            torch.tensor([0.52, 0.52, 0.025]) @ inertia_matrix[:3, :3].inverse(),
+        )
 
     def compute(
         self,
@@ -264,14 +281,13 @@ class AttitudeController(ControllerBase):
         target_pitch: Optional[Tensor] = None,
     ) -> Tensor:
         batch_shape = root_state.shape[:-1]
-        device = root_state.device
 
         if target_yaw_rate is None:
-            target_yaw_rate = torch.zeros(*batch_shape, 1, device=device)
+            target_yaw_rate = root_state.new_zeros(batch_shape + (1,))
         if target_pitch is None:
-            target_pitch = torch.zeros(*batch_shape, 1, device=device)
+            target_pitch = root_state.new_zeros(batch_shape + (1,))
         if target_roll is None:
-            target_roll = torch.zeros(*batch_shape, 1, device=device)
+            target_roll = root_state.new_zeros(batch_shape + (1,))
 
         cmd = self._compute(
             root_state.reshape(-1, 13),
@@ -291,13 +307,12 @@ class AttitudeController(ControllerBase):
         target_pitch: Tensor,
     ) -> Tensor:
         pos, rot, vel, ang_vel = torch.split(root_state, [3, 4, 3, 3], dim=-1)
-        device = pos.device
 
         R = quaternion_to_rotation_matrix(rot)
         yaw = torch.atan2(R[:, 1, 0], R[:, 0, 0]).unsqueeze(-1)
-        yaw_mat = axis_angle_to_matrix(yaw, torch.tensor([0.0, 0.0, 1.0], device=device))
-        roll_mat = axis_angle_to_matrix(target_roll, torch.tensor([1.0, 0.0, 0.0], device=device))
-        pitch_mat = axis_angle_to_matrix(target_pitch, torch.tensor([0.0, 1.0, 0.0], device=device))
+        yaw_mat = axis_angle_to_matrix(yaw, pos.new_tensor([0.0, 0.0, 1.0]))
+        roll_mat = axis_angle_to_matrix(target_roll, pos.new_tensor([1.0, 0.0, 0.0]))
+        pitch_mat = axis_angle_to_matrix(target_pitch, pos.new_tensor([0.0, 1.0, 0.0]))
         R_des = torch.bmm(torch.bmm(yaw_mat, roll_mat), pitch_mat)
 
         angle_error_matrix = 0.5 * (
@@ -308,7 +323,7 @@ class AttitudeController(ControllerBase):
             [
                 angle_error_matrix[:, 2, 1],
                 angle_error_matrix[:, 0, 2],
-                torch.zeros(yaw.shape[0], device=device),
+                yaw.new_zeros(yaw.shape[0]),
             ],
             dim=-1,
         )
@@ -330,10 +345,21 @@ class AttitudeController(ControllerBase):
         cmd = (cmd / self.max_thrusts) * 2 - 1
         return cmd
 
-    def process_rl_actions(self, actions: Tensor) -> Tuple[Tensor, Tensor]:
-        target_rate, target_thrust = actions.split([3, 1], dim=-1)
-        target_thrust = ((target_thrust + 1) / 2).clamp(min=0.0) * self.max_thrusts.sum()
-        return target_rate * torch.pi, target_thrust
+    def process_rl_actions(
+        self, actions: Tensor
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        target_thrust, target_yaw_rate, target_roll, target_pitch = actions.split(
+            [1, 1, 1, 1], dim=-1
+        )
+        target_thrust = (
+            ((target_thrust + 1) / 2).clamp(min=0.0) * self.max_thrusts.sum()
+        )
+        return (
+            target_thrust,
+            target_yaw_rate * torch.pi,
+            target_roll * torch.pi,
+            target_pitch * torch.pi,
+        )
 
 
 class RateController(ControllerBase):
@@ -349,15 +375,19 @@ class RateController(ControllerBase):
     """
 
     def __init__(self, g: float, uav_params: Dict[str, Any]) -> None:
+        super().__init__()
         rotor_config = uav_params["rotor_configuration"]
         force_constants = torch.as_tensor(rotor_config["force_constants"])
         max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
 
-        self.g_scalar: Tensor = torch.tensor(g)
-        self.max_thrusts: Tensor = max_rot_vel.square() * force_constants
+        self.register_buffer("g_scalar", torch.tensor(g))
+        self.register_buffer("max_thrusts", max_rot_vel.square() * force_constants)
         inertia_matrix = _build_inertia_matrix(uav_params["inertia"])
-        self.mixer: Tensor = compute_parameters(rotor_config, inertia_matrix)
-        self.gain_angular_rate: Tensor = torch.tensor([0.52, 0.52, 0.025]) @ inertia_matrix[:3, :3].inverse()
+        self.register_buffer("mixer", compute_parameters(rotor_config, inertia_matrix))
+        self.register_buffer(
+            "gain_angular_rate",
+            torch.tensor([0.52, 0.52, 0.025]) @ inertia_matrix[:3, :3].inverse(),
+        )
 
     def compute(
         self,

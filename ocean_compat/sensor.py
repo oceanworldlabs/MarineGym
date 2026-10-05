@@ -22,23 +22,14 @@ import torch
 # Utility functions
 # ---------------------------------------------------------------------------
 
-def to_camel_case(snake_str: str, to: str = "cC") -> str:
-    """Convert a snake_case string to camelCase (cC) or PascalCase (CC)."""
-    if to not in ("cC", "CC"):
-        raise ValueError("to_camel_case(): Choose a valid `to` argument (CC or cC)")
-    components = snake_str.lower().split("_")
-    if to == "cC":
-        return components[0] + "".join(x.title() for x in components[1:])
-    return "".join(x.title() for x in components)
-
-
 def orientation_from_view(
     camera: Sequence[float],
     target: Sequence[float],
 ) -> Tuple[float, float, float, float]:
     """Compute a quaternion (w, x, y, z) that orients a camera to look at *target*.
 
-    Local +Z points forward and +Y points up. Requires a finite nonzero view direction.
+    Local -Z points forward and +Y points up (USD/OpenGL convention). Requires
+    a finite nonzero view direction.
     """
     cam = torch.as_tensor(camera, dtype=torch.float64)
     tgt = torch.as_tensor(target, dtype=torch.float64)
@@ -54,15 +45,15 @@ def orientation_from_view(
         raise ValueError("camera and target must define a finite nonzero view direction")
     forward = forward / magnitude
 
-    right = torch.cross(up, forward, dim=0)
+    right = torch.cross(forward, up, dim=0)
     if right.norm() < 1e-8:
         up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float64)
-        right = torch.cross(up, forward, dim=0)
+        right = torch.cross(forward, up, dim=0)
     right = right / right.norm()
 
-    up_corrected = torch.cross(forward, right, dim=0)
+    up_corrected = torch.cross(right, forward, dim=0)
 
-    rot = torch.stack([right, up_corrected, forward], dim=1)
+    rot = torch.stack([right, up_corrected, -forward], dim=1)
     trace = rot[0, 0] + rot[1, 1] + rot[2, 2]
 
     if trace > 0:
@@ -206,7 +197,7 @@ def to_isaaclab_camera_cfg(
     prim_path: str,
     offset_pos: Tuple[float, float, float] = (0.0, 0.0, 0.0),
     offset_rot: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0),
-    offset_convention: str = "world",
+    offset_convention: str = "opengl",
 ) -> Any:
     """Convert a MarineGym camera config to an Isaac Lab 3 ``CameraCfg``.
 
@@ -217,7 +208,7 @@ def to_isaaclab_camera_cfg(
         prim_path: USD prim path for the camera (may contain ``{ENV_REGEX_NS}``).
         offset_pos: Position offset from parent prim.
         offset_rot: Orientation offset quaternion (w, x, y, z).
-        offset_convention: Coordinate convention for the offset rotation.
+        offset_convention: Coordinate convention; defaults to USD/OpenGL axes.
 
     Returns:
         An ``isaaclab.sensors.CameraCfg`` instance.
@@ -229,7 +220,7 @@ def to_isaaclab_camera_cfg(
         )
 
     from isaaclab.sensors import CameraCfg as IsaacLabCameraCfg
-    from isaaclab.sim import sim_utils
+    import isaaclab.sim as sim_utils
 
     spawn_kwargs = _build_spawn_kwargs(cfg.usd_params)
 
@@ -237,6 +228,9 @@ def to_isaaclab_camera_cfg(
         spawn = sim_utils.FisheyeCameraCfg(**spawn_kwargs)
     else:
         spawn = sim_utils.PinholeCameraCfg(**spawn_kwargs)
+
+    # MarineGym uses scalar-first WXYZ; Isaac Lab CameraCfg expects XYZW.
+    offset_rot_xyzw = (offset_rot[1], offset_rot[2], offset_rot[3], offset_rot[0])
 
     return IsaacLabCameraCfg(
         prim_path=prim_path,
@@ -247,7 +241,7 @@ def to_isaaclab_camera_cfg(
         spawn=spawn,
         offset=IsaacLabCameraCfg.OffsetCfg(
             pos=offset_pos,
-            rot=offset_rot,
+            rot=offset_rot_xyzw,
             convention=offset_convention,
         ),
     )

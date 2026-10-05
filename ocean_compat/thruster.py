@@ -6,10 +6,8 @@ MIT License, Copyright (c) 2023 Botian Xu, Tsinghua University.
 Port changes:
 - Removed nn.Module base (standalone class, vehicle manages state tensors)
 - Replaced nn.Parameter mutable state with regular tensors
-- Removed functorch dependency (not needed, original code used none either)
 - Added RotorConfig dataclass for YAML config validation
 - Type-annotated all public methods
-- forward() is torch.jit.script compatible
 """
 
 from __future__ import annotations
@@ -33,13 +31,17 @@ class RotorConfig:
     num_rotors: int
 
     @classmethod
-    def from_yaml(cls, rotor_config: Dict) -> "RotorConfig":
-        """Build from the ``rotor_configuration`` dict in a vehicle YAML."""
-        fc = torch.as_tensor(rotor_config["force_constants"], dtype=torch.float32)
-        mc = torch.as_tensor(rotor_config["moment_constants"], dtype=torch.float32)
-        mrv = torch.as_tensor(rotor_config["max_rotation_velocities"], dtype=torch.float32)
-        tc = torch.as_tensor(rotor_config["time_constants"], dtype=torch.float32)
-        d = torch.as_tensor(rotor_config["directions"], dtype=torch.float32)
+    def from_yaml(
+        cls,
+        rotor_config: Dict,
+        device: torch.device | str | None = None,
+    ) -> "RotorConfig":
+        """Build from a vehicle YAML mapping on CPU or the requested device."""
+        fc = torch.as_tensor(rotor_config["force_constants"], dtype=torch.float32, device=device)
+        mc = torch.as_tensor(rotor_config["moment_constants"], dtype=torch.float32, device=device)
+        mrv = torch.as_tensor(rotor_config["max_rotation_velocities"], dtype=torch.float32, device=device)
+        tc = torch.as_tensor(rotor_config["time_constants"], dtype=torch.float32, device=device)
+        d = torch.as_tensor(rotor_config["directions"], dtype=torch.float32, device=device)
         return cls(
             force_constants=fc,
             moment_constants=mc,
@@ -96,8 +98,13 @@ class T200Thruster:
         self.directions = rotor_config.directions
 
         # First-order time constants for throttle smoothing
-        self.tau_up = torch.full((self.num_rotors,), tau_up, dtype=torch.float32)
-        self.tau_down = torch.full((self.num_rotors,), tau_down, dtype=torch.float32)
+        config_tensor = rotor_config.force_constants
+        self.tau_up = torch.full(
+            (self.num_rotors,), tau_up, dtype=config_tensor.dtype, device=config_tensor.device
+        )
+        self.tau_down = torch.full(
+            (self.num_rotors,), tau_down, dtype=config_tensor.dtype, device=config_tensor.device
+        )
         self.noise_scale = noise_scale
 
     def forward(
@@ -211,8 +218,13 @@ class RotorGroupModel:
         self.KF = rotor_config.max_rotation_velocities.square() * rotor_config.force_constants
         self.KM = rotor_config.max_rotation_velocities.square() * rotor_config.moment_constants
 
-        self.tau_up = torch.full((self.num_rotors,), tau_up, dtype=torch.float32)
-        self.tau_down = torch.full((self.num_rotors,), tau_down, dtype=torch.float32)
+        config_tensor = rotor_config.force_constants
+        self.tau_up = torch.full(
+            (self.num_rotors,), tau_up, dtype=config_tensor.dtype, device=config_tensor.device
+        )
+        self.tau_down = torch.full(
+            (self.num_rotors,), tau_down, dtype=config_tensor.dtype, device=config_tensor.device
+        )
         self.noise_scale = noise_scale
 
     def forward(
