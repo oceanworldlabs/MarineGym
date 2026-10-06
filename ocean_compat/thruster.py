@@ -6,7 +6,7 @@ MIT License, Copyright (c) 2023 Botian Xu, Tsinghua University.
 Port changes:
 - Removed nn.Module base (standalone class, vehicle manages state tensors)
 - Replaced nn.Parameter mutable state with regular tensors
-- Added RotorConfig dataclass for YAML config validation
+- Added RotorConfig dataclass with rotor-count and vector-shape checks
 - Type-annotated all public methods
 """
 
@@ -37,19 +37,29 @@ class RotorConfig:
         device: torch.device | str | None = None,
     ) -> "RotorConfig":
         """Build from a vehicle YAML mapping on CPU or the requested device."""
-        fc = torch.as_tensor(rotor_config["force_constants"], dtype=torch.float32, device=device)
-        mc = torch.as_tensor(rotor_config["moment_constants"], dtype=torch.float32, device=device)
-        mrv = torch.as_tensor(rotor_config["max_rotation_velocities"], dtype=torch.float32, device=device)
-        tc = torch.as_tensor(rotor_config["time_constants"], dtype=torch.float32, device=device)
-        d = torch.as_tensor(rotor_config["directions"], dtype=torch.float32, device=device)
-        return cls(
-            force_constants=fc,
-            moment_constants=mc,
-            max_rotation_velocities=mrv,
-            time_constants=tc,
-            directions=d,
-            num_rotors=int(rotor_config["num_rotors"]),
-        )
+        try:
+            num_rotors = int(rotor_config["num_rotors"])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("num_rotors must be a positive integer") from exc
+        if num_rotors <= 0:
+            raise ValueError("num_rotors must be a positive integer")
+
+        tensors = {}
+        for field in (
+            "force_constants",
+            "moment_constants",
+            "max_rotation_velocities",
+            "time_constants",
+            "directions",
+        ):
+            tensor = torch.as_tensor(rotor_config[field], dtype=torch.float32, device=device)
+            if tensor.shape != (num_rotors,):
+                raise ValueError(
+                    f"{field} must have shape ({num_rotors},), got {tuple(tensor.shape)}"
+                )
+            tensors[field] = tensor
+
+        return cls(**tensors, num_rotors=num_rotors)
 
 
 class T200Thruster:

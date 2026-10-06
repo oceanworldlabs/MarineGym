@@ -57,7 +57,9 @@ def test_rotor_group_model_matches_upstream_square_law(device: str) -> None:
 
     target_throttle = torch.sqrt(torch.clamp((commands + 1.0) / 2.0, 0.0, 1.0))
     tau = torch.where(target_throttle > throttle, model.tau_up, model.tau_down)
-    expected_throttle = throttle + torch.clamp(tau, 0.0, 1.0) * (target_throttle - throttle)
+    expected_throttle = throttle + torch.clamp(tau, 0.0, 1.0) * (
+        target_throttle - throttle
+    )
     thrust_fraction = torch.clamp(expected_throttle.square(), 0.0, 1.0)
     kf = config.max_rotation_velocities.square() * config.force_constants
     km = config.max_rotation_velocities.square() * config.moment_constants
@@ -94,3 +96,46 @@ def test_tau_tensors_follow_config_dtype(model_type: type) -> None:
 
     assert model.tau_up.dtype == config.force_constants.dtype
     assert model.tau_down.dtype == config.force_constants.dtype
+
+
+@pytest.mark.parametrize("num_rotors", [0, -1])
+def test_rotor_config_rejects_nonpositive_num_rotors(num_rotors: int) -> None:
+    config = dict(ROTOR_CONFIG, num_rotors=num_rotors)
+
+    with pytest.raises(ValueError, match="num_rotors"):
+        RotorConfig.from_yaml(config)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "force_constants",
+        "moment_constants",
+        "max_rotation_velocities",
+        "time_constants",
+        "directions",
+    ],
+)
+def test_rotor_config_rejects_wrong_vector_length(field: str) -> None:
+    config = dict(ROTOR_CONFIG, **{field: ROTOR_CONFIG[field][:-1]})
+
+    with pytest.raises(ValueError, match=field):
+        RotorConfig.from_yaml(config)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "force_constants",
+        "moment_constants",
+        "max_rotation_velocities",
+        "time_constants",
+        "directions",
+    ],
+)
+def test_rotor_config_rejects_non_vector_with_matching_numel(field: str) -> None:
+    values = ROTOR_CONFIG[field]
+    config = dict(ROTOR_CONFIG, **{field: [values[:2], values[2:]]})
+
+    with pytest.raises(ValueError, match=field):
+        RotorConfig.from_yaml(config)

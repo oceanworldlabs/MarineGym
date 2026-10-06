@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -145,27 +146,30 @@ def load_camera_cfg_from_dict(data: dict[str, Any]) -> Union[PinholeCameraCfg, F
     Expected keys mirror the dataclass fields. Missing keys fall back to defaults.
     """
     projection = data.get("projection_type", "pinhole")
+    config_types = {
+        "pinhole": PinholeCameraCfg,
+        "fisheye_polynomial": FisheyeCameraCfg,
+    }
+    try:
+        config_type = config_types[projection]
+    except (KeyError, TypeError):
+        raise ValueError(f"Unsupported camera projection_type: {projection!r}") from None
+
     usd_data = data.get("usd_params", {})
+    if usd_data is None:
+        usd_data = {}
+    if not isinstance(usd_data, Mapping):
+        raise TypeError("usd_params must be a mapping or None")
 
-    if projection == "fisheye_polynomial":
-        usd_cfg = FisheyeCameraCfg.UsdCameraCfg(**{
-            k: v for k, v in usd_data.items()
-            if v is not None and k in FisheyeCameraCfg.UsdCameraCfg.__dataclass_fields__
-        })
-        return FisheyeCameraCfg(
-            sensor_tick=data.get("sensor_tick", 0.0),
-            data_types=data.get("data_types", ["rgb"]),
-            resolution=tuple(data.get("resolution", (640, 480))),
-            semantic_types=data.get("semantic_types", ["class"]),
-            projection_type=projection,
-            usd_params=usd_cfg,
-        )
+    usd_fields = config_type.UsdCameraCfg.__dataclass_fields__
+    unknown_fields = [name for name in usd_data if name not in usd_fields]
+    if unknown_fields:
+        raise ValueError(f"Unknown usd_params fields: {unknown_fields!r}")
 
-    usd_cfg = PinholeCameraCfg.UsdCameraCfg(**{
-        k: v for k, v in usd_data.items()
-        if v is not None and k in PinholeCameraCfg.UsdCameraCfg.__dataclass_fields__
-    })
-    return PinholeCameraCfg(
+    usd_cfg = config_type.UsdCameraCfg(
+        **{name: value for name, value in usd_data.items() if value is not None}
+    )
+    return config_type(
         sensor_tick=data.get("sensor_tick", 0.0),
         data_types=data.get("data_types", ["rgb"]),
         resolution=tuple(data.get("resolution", (640, 480))),
@@ -207,7 +211,9 @@ def to_isaaclab_camera_cfg(
         cfg: MarineGym camera config (PinholeCameraCfg or FisheyeCameraCfg).
         prim_path: USD prim path for the camera (may contain ``{ENV_REGEX_NS}``).
         offset_pos: Position offset from parent prim.
-        offset_rot: Orientation offset quaternion (w, x, y, z).
+        offset_rot: Orientation offset quaternion (w, x, y, z). The default identity
+            with ``opengl`` points along local -Z; use
+            ``orientation_from_view((0, 0, 0), (1, 0, 0))`` for a +X view.
         offset_convention: Coordinate convention; defaults to USD/OpenGL axes.
 
     Returns:

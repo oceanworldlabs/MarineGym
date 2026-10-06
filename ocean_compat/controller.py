@@ -1,7 +1,7 @@
 """Lee attitude / rate / position controllers ported from MarineGym.
 
-Pure PyTorch — no torchrl, tensordict, or nn.Parameter dependencies.
-All gains and parameters are regular tensors (not trainable).
+Uses PyTorch and PyYAML without torchrl or tensordict imports.
+Controllers are callable nn.Module instances with non-trainable state buffers.
 
 Ported from marinegym/controllers/ (MIT License,
 Copyright (c) 2023 Botian Xu, Tsinghua University).
@@ -30,9 +30,6 @@ class ControllerBase(nn.Module, abc.ABC):
     """Base class for non-trainable MarineGym controllers."""
 
     REGISTRY: Dict[str, type] = {}
-
-    def __init__(self) -> None:
-        super().__init__()
 
     def forward(self, *args: Any, **kwargs: Any) -> Tensor:
         return self.compute(*args, **kwargs)

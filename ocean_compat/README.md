@@ -7,9 +7,8 @@ PyTorch and PyYAML.
 The code targets Isaac Sim 6 APIs and Isaac Lab 3 beta-era APIs. The Lab API
 references checked for this snapshot are tag `v3.0.0-beta2` and the
 `release/3.0.0` branch snapshot `72cd51194381caa93ee024f93e4007b1fb6c5b92`;
-neither a final Isaac Lab 3 tag nor runtime execution was verified. No Isaac Sim
-or Isaac Lab compatibility, camera rendering, or GPU behavior is claimed by
-these source-level utilities.
+neither a final Isaac Lab 3 tag nor runtime execution was verified. Isaac Sim
+and Isaac Lab runtime compatibility and camera rendering remain unverified.
 
 ## Modules
 
@@ -64,12 +63,16 @@ use local `-Z` forward and `+Y` up. The camera helpers' mapping between these
 conventions has not passed runtime or rendered-frame validation; do not infer
 camera pose correctness from configuration construction alone.
 
+The adapter selects a pinhole or polynomial fisheye spawn class. It does not
+forward custom projection metadata or map `semantic_types` to Isaac Lab's
+`semantic_filter`.
+
 Controller objects are callable `torch.nn.Module` instances with non-trainable
 registered buffers. Use `.to(device=..., dtype=...)` to align controller state
 with the input tensors. `RotorConfig.from_yaml(..., device=...)` places thruster
-configuration and smoothing tensors on the requested device. Focused CPU and
-CUDA tensor tests cover these paths; they do not establish Isaac runtime or
-vehicle simulation acceptance.
+configuration and smoothing tensors on the requested device. The tensor tests
+cover CPU behavior and include CUDA cases that run when CUDA is available.
+They do not establish Isaac runtime or vehicle simulation acceptance.
 
 `RateController.process_rl_actions` returns collective thrust with shape
 `(..., 1)` and bounds based on the sum of rotor maximum thrusts. This matches
@@ -78,6 +81,11 @@ maximum. It differs from the upstream `RateController.process_rl_actions`
 method, which returns per-rotor values and is not directly composable with the
 upstream controller computation; this distinction is an API-shape note, not a
 claim of changed physical behavior.
+
+Inherited scientific limitations remain: the controllers' gyroscopic term
+`cross(angular_velocity, angular_velocity)` is zero, and the T200 model retains
+the upstream zero torque/noise terms and RPM-to-force polynomial. Zero force
+at exactly zero initial RPM does not imply zero residual force after spin-down.
 
 ## License and attribution
 
